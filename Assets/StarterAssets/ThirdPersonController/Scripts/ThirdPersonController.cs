@@ -9,6 +9,7 @@ using UnityEngine.InputSystem;
 namespace StarterAssets
 {
     [RequireComponent(typeof(CharacterController))]
+    [RequireComponent(typeof(AudioSource))]
 #if ENABLE_INPUT_SYSTEM && STARTER_ASSETS_PACKAGES_CHECKED
     [RequireComponent(typeof(PlayerInput))]
 #endif
@@ -134,6 +135,14 @@ namespace StarterAssets
 
         private void Start()
         {
+            //mic init
+            //get components you'll need
+            audioSource = GetComponent<AudioSource>();
+
+            //kick it off
+            StartMicrophone();
+
+
             _cinemachineTargetYaw = CinemachineCameraTarget.transform.rotation.eulerAngles.y;
             
             _hasAnimator = TryGetComponent(out _animator);
@@ -159,6 +168,7 @@ namespace StarterAssets
             JumpAndGravity();
             GroundedCheck();
             Move();
+            UpdateAudio();
         }
 
         private void LateUpdate()
@@ -388,5 +398,137 @@ namespace StarterAssets
                 AudioSource.PlayClipAtPoint(LandingAudioClip, transform.TransformPoint(_controller.center), FootstepAudioVolume);
             }
         }
+       
+     
+            public float minThreshold = 0;
+            public float frequency = 0.0f;
+            public int audioSampleRate = 44100;
+            public string microphone;               //if you need to use a mic other than default
+            public FFTWindow fftWindow;
+
+            private int samples = 8192;
+            private AudioSource audioSource;
+
+
+
+       
+
+            void StartMicrophone()
+            {
+                audioSource.Stop();
+                //Start recording to audioclip from the mic
+                audioSource.clip = Microphone.Start(microphone, true, 10, audioSampleRate);
+                audioSource.loop = true;
+                // Mute the sound with an Audio Mixer group becuase we don't want the player to hear it
+                Debug.Log(Microphone.IsRecording(microphone).ToString());
+
+                if (Microphone.IsRecording(microphone))
+                { //check that the mic is recording, otherwise you'll get stuck in an infinite loop waiting for it to start
+                    while (!(Microphone.GetPosition(microphone) > 0))
+                    {
+                    } // Wait until the recording has started. 
+
+                    Debug.Log("recording started with " + microphone);
+
+                    // Start playing the audio source
+                    audioSource.Play();
+                }
+                else
+                {
+                    //microphone doesn't work for some reason
+
+                    Debug.Log(microphone + " doesn't work!");
+                }
+            }
+
+            
+            private void UpdateAudio()
+            {
+
+                float vol = GetAveragedVolume();
+                if (vol > 0.01f)
+                {
+                    JumpHeight = vol * 20.0f;
+
+                    // the square root of H * -2 * G = how much velocity needed to reach desired height
+                    _verticalVelocity = Mathf.Sqrt(JumpHeight * -2f * Gravity);
+
+                    // update animator if using character
+                    if (_hasAnimator)
+                    {
+                        _animator.SetBool(_animIDJump, true);
+                    }
+                }
+
+            if (vol > 0.01f)  //or some higher threshold
+                {
+                    float freq = GetFundamentalFrequency();
+                    if (freq < 800)
+                    {
+                        //thePlayer.side = 1;
+                    }
+                    else if (freq < 1000)
+                    {
+                        //thePlayer.side = -1;
+                    }
+                    else if (freq < 1500)
+                    {
+                        //thePlayer.forward = 1;
+                    }
+                    else if (freq < 2000)
+                    {
+                        //thePlayer.forward = -1;
+                    }
+                    else
+                    {
+                        //thePlayer.move = 0;
+                        //thePlayer.turn = 0;
+                    }
+                    //any freq over 2000 is ignored
+
+
+                    Debug.Log("VOL " + vol.ToString());
+                    Debug.Log("FFT " + GetFundamentalFrequency().ToString());
+                }
+
+            }
+
+
+            public float GetAveragedVolume()
+            {
+                float[] data = new float[256];
+                float a = 0;
+                audioSource.GetOutputData(data, 0);
+                foreach (float s in data)
+                {
+                    a += Mathf.Abs(s);
+                }
+                return a / 256;
+
+            }
+
+            public float GetFundamentalFrequency()
+            {
+                float fundamentalFrequency = 0.0f;
+                float[] data = new float[samples];
+                audioSource.GetSpectrumData(data, 0, fftWindow);
+                float s = 0.0f;
+                int i = 0;
+                for (int j = 1; j < samples; j++)
+                {
+                    if (data[j] > minThreshold) // volumn must meet minimum threshold
+                    {
+                        if (s < data[j])
+                        {
+                            s = data[j];
+                            i = j;
+                        }
+                    }
+                }
+                fundamentalFrequency = i * audioSampleRate / samples;
+                frequency = fundamentalFrequency;
+                return fundamentalFrequency;
+            }
+        
     }
 }
